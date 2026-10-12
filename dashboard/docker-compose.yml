@@ -1,0 +1,16 @@
+services:
+  m5-dashboard:
+    build: .
+    image: m5-dashboard:latest
+    container_name: m5-dashboard
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      # 默认映射到宿主机所有网卡；如需限定来源可改为 "192.168.x.x:8787:8787"
+      - "8787:8787"
+    volumes:
+      # 配置目录只读挂载：各产品独立文件（其中 codex.json 为 Codex 凭据文件）
+      - ./config:/app/config:ro
+      # 状态快照持久化：workbuddy-state.json（当日消耗基线），容器重建不丢失
+      - ./data:/app/data

@@ -1,0 +1,13 @@
+{
+  "name": "m5-ai-usage-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "华为 M5 平板 AI 用量看板：聚合 Codex / DeepSeek / WorkBuddy / TRAE / MiMo / Qoder / MiniMax 七个数据源的额度与用量",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

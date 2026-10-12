@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>M5 AI 用量看板</title>
+<style>
+  :root { --bg:#0b0f17; --card:#151b26; --muted:#8b97a8; --fg:#e8eef7; --accent:#4da3ff; --ok:#37d67a; --warn:#ffb020; --bad:#ff5c5c; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body { background:var(--bg); color:var(--fg); font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:4vh 4vw; display:flex; flex-direction:column; gap:22px; }
+  .clock { text-align:center; }
+  .clock .time { font-size: clamp(48px, 11vw, 132px); font-weight:200; letter-spacing:2px; line-height:1; font-variant-numeric: tabular-nums; }
+  .clock .date { color:var(--muted); font-size: clamp(14px, 2.2vw, 22px); margin-top:8px; }
+  .grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:22px; }
+  /* 仅在真机手机级窄屏才回落单列，保证平板/桌面一律两列 */
+  @media (max-width: 400px) { .grid { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid #222c3c; border-radius:16px; padding:22px 24px; cursor:pointer; transition:opacity .15s ease, border-color .25s ease, box-shadow .25s ease; -webkit-tap-highlight-color:transparent; }
+  .card.refreshing { opacity:.45; }
+  .card.flash { animation:flash .7s ease; }
+  @keyframes flash {
+    0% { border-color:var(--accent); box-shadow:0 0 0 0 rgba(77,163,255,.55); }
+    100% { border-color:#222c3c; box-shadow:0 0 0 16px rgba(77,163,255,0); }
+  }
+  .card h2 { margin:0 0 16px; font-size:16px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:1px; display:flex; justify-content:space-between; align-items:center; }
+  .badge { font-size:12px; padding:2px 10px; border-radius:999px; background:#22304a; color:#9fc2ff; text-transform:none; letter-spacing:0; }
+  .win { margin-bottom:18px; }
+  .win:last-child { margin-bottom:0; }
+  .win .row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .win .name { font-size:15px; }
+  .win .pct { font-size:22px; font-weight:600; font-variant-numeric: tabular-nums; }
+  .bar { height:12px; border-radius:999px; background:#0d1421; overflow:hidden; }
+  .bar > i { display:block; height:100%; border-radius:999px; background:var(--ok); transition:width .4s ease; }
+  .reset { color:var(--muted); font-size:13px; margin-top:6px; }
+  .bal { display:flex; justify-content:space-between; align-items:baseline; padding:10px 0; }
+  .bal .amt { font-size:26px; font-weight:600; font-variant-numeric: tabular-nums; }
+  .muted { color:var(--muted); }
+  .k { color:var(--muted); font-size:13px; }
+  .sect { color:var(--muted); font-size:13px; margin-top:16px; padding-bottom:6px; border-bottom:1px dashed #26313f; }
+  .err { color:var(--bad); font-size:14px; }
+  .ok-text { color:var(--ok); }
+  .bad-text { color:var(--bad); }
+  .foot { color:var(--muted); font-size:13px; text-align:center; }
+  .gear { position:fixed; top:12px; left:12px; z-index:1000; width:42px; height:42px; display:flex; align-items:center; justify-content:center; border:1px solid #222c3c; border-radius:12px; background:rgba(21,27,38,.72); color:var(--muted); cursor:pointer; -webkit-tap-highlight-color:transparent; transition:color .2s ease, border-color .2s ease; }
+  .gear:hover, .gear:active { color:var(--fg); border-color:var(--accent); }
+  .gear svg { width:22px; height:22px; display:block; transition:transform .35s ease; }
+  .gear.open svg { transform:rotate(90deg); }
+  .settings-overlay { position:fixed; inset:0; z-index:1001; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(5,8,13,.7); }
+  .settings-overlay.show { display:flex; }
+  .settings-panel { width:100%; max-width:460px; max-height:82vh; overflow:auto; background:var(--card); border:1px solid #222c3c; border-radius:16px; padding:22px 24px; }
+  .settings-panel h3 { margin:0 0 6px; font-size:18px; font-weight:600; }
+  .settings-panel .hint { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .set-row { display:flex; align-items:center; gap:12px; padding:10px 2px; border-bottom:1px dashed #26313f; }
+  .set-name { font-size:15px; flex:1 1 auto; }
+  .set-switch { position:relative; flex:none; width:42px; height:24px; }
+  .set-switch input { position:absolute; opacity:0; width:0; height:0; }
+  .set-switch > span { position:absolute; inset:0; border-radius:999px; background:#0d1421; border:1px solid #2b3547; transition:background .2s ease, border-color .2s ease; }
+  .set-switch > span::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--muted); transition:transform .2s ease, background .2s ease; }
+  .set-switch input:checked + span { background:rgba(77,163,255,.25); border-color:var(--accent); }
+  .set-switch input:checked + span::after { transform:translateX(18px); background:var(--accent); }
+  .set-ctrl { display:flex; gap:8px; flex:none; }
+  .set-btn { width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px; border:1px solid #2b3547; background:#0d1421; color:var(--fg); font-size:13px; line-height:1; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:border-color .2s ease, color .2s ease, opacity .2s ease; }
+  .set-btn:hover:not(:disabled), .set-btn:active:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .set-btn:disabled { opacity:.3; cursor:default; }
+  .settings-foot { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+  .set-action { padding:9px 18px; border-radius:10px; border:1px solid #2b3547; background:#0d1421; color:var(--fg); font-size:14px; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:border-color .2s ease, color .2s ease; }
+  .set-action:hover, .set-action:active { border-color:var(--accent); color:var(--accent); }
+  .set-action.primary { background:var(--accent); border-color:var(--accent); color:#08111f; font-weight:600; }
+  .set-action.primary:hover, .set-action.primary:active { color:#08111f; opacity:.9; }
+</style>
+</head>
+<body>
+  <button class="gear" id="gear" aria-label="设置" title="设置">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.2"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+  </button>
+
+  <div class="settings-overlay" id="settings-overlay">
+    <div class="settings-panel">
+      <h3>卡片设置</h3>
+      <div class="hint">用 ▲ ▼ 调整显示顺序，右侧开关控制每个模块是否显示，修改会自动保存。</div>
+      <div id="settings-list"></div>
+      <div class="settings-foot">
+        <button class="set-action" id="settings-reset">恢复默认</button>
+        <button class="set-action primary" id="settings-close">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="clock">
+      <div class="time" id="time">--:--:--</div>
+      <div class="date" id="date">&nbsp;</div>
+    </div>
+
+    <div class="grid">
+      <div class="card" data-source="codex" data-title="Codex 额度">
+        <h2>Codex 额度 <span class="badge" id="codex-plan">—</span></h2>
+        <div id="codex-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="deepseek" data-title="DeepSeek 余额">
+        <h2>DeepSeek 余额</h2>
+        <div id="ds-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="workbuddy" data-title="WorkBuddy 积分">
+        <h2>WorkBuddy 积分 <span class="badge" id="wb-plan">—</span></h2>
+        <div id="wb-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="trae" data-title="TRAE 积分">
+        <h2>TRAE 积分 <span class="badge" id="trae-plan">—</span></h2>
+        <div id="trae-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="mimo" data-title="MiMo 额度">
+        <h2>MiMo 额度 <span class="badge" id="mimo-plan">—</span></h2>
+        <div id="mimo-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="qoder" data-title="Qoder CN 用量">
+        <h2>Qoder CN 用量 <span class="badge" id="qoder-plan">—</span></h2>
+        <div id="qoder-body"><div class="muted">加载中…</div></div>
+      </div>
+
+      <div class="card" data-source="minimax" data-title="MiniMax 余额">
+        <h2>MiniMax 余额</h2>
+        <div id="minimax-body"><div class="muted">加载中…</div></div>
+      </div>
+    </div>
+
+    <div class="foot" id="foot">—</div>
+  </div>
+
+<script>
+const REFRESH_MS = 30000;
+
+function pad(n){ return String(n).padStart(2,'0'); }
+function tick(){
+  const d = new Date();
+  document.getElementById('time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const wk = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+  document.getElementById('date').textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${wk}`;
+}
+setInterval(tick, 1000); tick();
+
+function barColor(p){ return p <= 10 ? 'var(--bad)' : p <= 25 ? 'var(--warn)' : 'var(--ok)'; }
+function fmtInt(n){ return Math.round(Number(n) || 0).toLocaleString('en-US'); }
+function fmtTokens(n){
+  n = Number(n) || 0;
+  if (n >= 1e8) return (n / 1e6).toFixed(0) + 'M';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+function curSym(currency){ return currency === 'USD' ? '$' : '¥'; }
+function fmtMoney(n, currency){
+  return curSym(currency) + (Number(n) || 0).toFixed(4);
+}
+function fmtCredit(n){
+  return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-US');
+}
+
+// 汇总「即将到期积分」文案：未来3天 > 未来7天 > 最近一次有积分到期的日期，均无则提示无。
+function expirySummary(packs){
+  const nowMs = Date.now();
+  const arr = packs || [];
+  const sumWithin = (days) => {
+    const horizon = nowMs + days * 86400000;
+    return arr
+      .filter(p => { const ts = new Date(p.until).getTime(); return ts > nowMs && ts <= horizon; })
+      .reduce((s, p) => s + (Number(p.remain) || 0), 0);
+  };
+  const ymd = (s) => { const d = new Date(s); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
+  const upcoming = arr
+    .filter(p => new Date(p.until).getTime() > nowMs && Number(p.remain) > 0)
+    .sort((a, b) => new Date(a.until) - new Date(b.until));
+  const sum3 = sumWithin(3), sum7 = sumWithin(7);
+  if (sum3 > 0) return `未来3天到期积分 ${fmtCredit(sum3)}`;
+  if (sum7 > 0) return `未来7天到期积分 ${fmtCredit(sum7)}`;
+  if (upcoming.length){
+    const key = ymd(upcoming[0].until);
+    const credits = upcoming.filter(p => ymd(p.until) === key).reduce((s, p) => s + (Number(p.remain) || 0), 0);
+    return `最近到期 ${key} 积分 ${fmtCredit(credits)}`;
+  }
+  return '近期无积分到期';
+}
+
+function renderCodex(c){
+  const plan = document.getElementById('codex-plan');
+  const body = document.getElementById('codex-body');
+  if (!c || !c.ok){
+    plan.textContent = '—';
+    body.innerHTML = `<div class="err">采集失败：${(c && c.error) || '未知错误'}</div>`;
+    return;
+  }
+  plan.textContent = c.planType ? `套餐：${c.planType}` : '—';
+  if (!c.windows || !c.windows.length){
+    body.innerHTML = `<div class="muted">当前账号未返回额度窗口</div>`;
+    return;
+  }
+  body.innerHTML = c.windows.map(w => {
+    const reset = w.resetsAt ? new Date(w.resetsAt).toLocaleString() : '未知';
+    return `<div class="win">
+      <div class="row"><span class="name">${w.label}</span><span class="pct">剩余 ${w.remainingPercent}%</span></div>
+      <div class="bar"><i style="width:${w.remainingPercent}%;background:${barColor(w.remainingPercent)}"></i></div>
+      <div class="reset">已用 ${w.usedPercent}% · 重置于 ${reset}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderDeepseek(d, u){
+  const body = document.getElementById('ds-body');
+  let html = '';
+
+  const uOk = !!(u && u.ok);
+  const t = uOk ? (u.today || {}) : null;
+  const cur = (uOk && u.currency) || 'CNY';
+
+  // 一行汇总：余额 · 今日消费
+  if (!d || !d.ok){
+    html += `<div class="err">余额采集失败：${(d && d.error) || '未知错误'}</div>`;
+  } else {
+    const infos = d.balanceInfos || [];
+    const parts = [];
+    if (infos.length){
+      const b = infos[0];
+      parts.push(`余额 ${curSym(b.currency)}${b.total_balance ?? '—'}`);
+    }
+    parts.push(`今日消费 ${uOk ? fmtMoney(t.cost, cur) : '—'}`);
+    html += `<div class="reset muted">${parts.join(' · ')}</div>`;
+  }
+
+  // 今日用量（平台内部接口）
+  html += `<div class="sect">今日用量</div>`;
+  if (!uOk){
+    html += `<div class="err">${(u && u.error) || '未配置用量 Token'}</div>`;
+  } else {
+    html +=
+      `<div class="reset muted">API请求 ${fmtInt(t.requests)}次 · Tokens ${fmtTokens(t.tokens)}</div>` +
+      `<div class="reset muted">缓存命中 ${fmtTokens(t.cacheHit)} · 未命中 ${fmtTokens(t.cacheMiss)} · 输出 ${fmtTokens(t.response)}</div>`;
+  }
+
+  // 本月累计（同一平台接口按月汇总）
+  if (uOk && u.month){
+    html += `<div class="reset muted">本月累计 ${fmtInt(u.month.requests)} 次 · ${fmtInt(u.month.tokens)} tokens · ${fmtMoney(u.month.cost, cur)}</div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function renderWorkbuddy(w){
+  const plan = document.getElementById('wb-plan');
+  const body = document.getElementById('wb-body');
+  if (!w || !w.ok){
+    plan.textContent = '—';
+    body.innerHTML = `<div class="err">采集失败：${(w && w.error) || '未知错误'}</div>`;
+    return;
+  }
+  plan.textContent = w.planName ? `套餐：${w.planName}` : '积分';
+
+  const today = w.todayUsed == null ? '—' : fmtCredit(w.todayUsed) + (w.todayUsedEstimated ? '（估算）' : '');
+  // 到期积分提示：与 TRAE / Qoder 共用 expirySummary（未来3天 > 未来7天 > 最近到期日）
+  const expiryText = expirySummary(w.packExpiry);
+
+  body.innerHTML =
+    `<div class="bal"><span class="k">剩余积分</span><span class="amt">${fmtCredit(w.totalRemain)}</span></div>` +
+    `<div class="reset">当日消耗 ${today}</div>` +
+    `<div class="reset">${expiryText}</div>`;
+}
+
+function renderTrae(t){
+  const plan = document.getElementById('trae-plan');
+  const body = document.getElementById('trae-body');
+  if (!t || !t.ok){
+    plan.textContent = '—';
+    body.innerHTML = `<div class="err">采集失败：${(t && t.error) || '未知错误'}</div>`;
+    return;
+  }
+  plan.textContent = t.plan ? `套餐：${t.plan}` : '积分';
+
+  if (t.unlimited){
+    body.innerHTML = `<div class="bal"><span class="k">额度</span><span class="amt">不限量</span></div>`;
+    return;
+  }
+
+  let html = '';
+  const used = Number(t.totalUsed) || 0;
+  const limit = Number(t.totalLimit) || 0;
+  // 到期积分提示（未来3天 > 未来7天 > 最近到期日）
+  const expiryText = expirySummary(t.packExpiry);
+  if (limit > 0){
+    const remainPct = Math.max(0, Math.min(100, (t.totalRemain / limit) * 100));
+    html += `<div class="win">
+      <div class="row"><span class="name">Credits</span><span class="pct">剩余 ${fmtCredit(t.totalRemain)}</span></div>
+      <div class="bar"><i style="width:${remainPct}%;background:${barColor(remainPct)}"></i></div>
+      <div class="reset">已用 ${fmtCredit(used)} / ${fmtCredit(limit)} credits</div>
+      <div class="reset">${expiryText}</div>
+    </div>`;
+  } else {
+    const remain = t.totalRemain == null ? '—' : fmtCredit(t.totalRemain);
+    html += `<div class="bal"><span class="k">已用积分</span><span class="amt">${fmtCredit(used)}</span></div>`;
+    html += `<div class="reset muted">剩余 ${remain} · ${expiryText}</div>`;
+  }
+  body.innerHTML = html;
+}
+
+function renderMimo(m){
+  const plan = document.getElementById('mimo-plan');
+  const body = document.getElementById('mimo-body');
+  if (!m || !m.ok){
+    plan.textContent = '—';
+    body.innerHTML = `<div class="err">采集失败：${(m && m.error) || '未知错误'}</div>`;
+    return;
+  }
+  const p = m.plan || {};
+  plan.textContent = p.expired ? '套餐已过期'
+    : (p.planName || p.planCode) ? `套餐：${p.planName || p.planCode}` : 'MiMo';
+
+  let html = '';
+
+  const b = m.balance;
+  const cur = (b && b.currency) || m.costCurrency || null;
+  const sym = cur === 'USD' ? '$' : '¥';
+  // 金额最多保留 4 位小数，并去掉多余的尾随 0（1.4800 → 1.48）。
+  const money = (v) => sym + (Number(v) || 0).toFixed(4).replace(/\.?0+$/, '');
+  const parts = [];
+  if (b && b.total != null) parts.push(`总余额 ${money(b.total)}`);
+  if (b && b.cash != null) parts.push(`现金余额 ${money(b.cash)}`);
+  if (b && b.gift != null) parts.push(`赠送余额 ${money(b.gift)}`);
+  parts.push(`今日消费 ${m.todayCost == null ? '—' : money(m.todayCost)}`);
+  html += `<div class="reset muted">${parts.join(' · ')}</div>`;
+
+  if (m.quota){
+    const q = m.quota;
+    html += `<div class="win">
+      <div class="row"><span class="name">月度 Token 额度</span><span class="pct">剩余 ${q.remainingPercent.toFixed(1)}%</span></div>
+      <div class="bar"><i style="width:${q.remainingPercent}%;background:${barColor(q.remainingPercent)}"></i></div>
+      <div class="reset">已用 ${fmtTokens(q.used)} / ${fmtTokens(q.limit)}</div>
+    </div>`;
+  } else {
+    html += `<div class="muted">未获取到 Token Plan 月度额度（按量付费账号无此项）</div>`;
+  }
+
+  html += `<div class="sect">今日用量</div>`;
+  const t = m.today;
+  if (!t){
+    html += `<div class="muted">未获取到今日用量（明细接口不可用）</div>`;
+  } else {
+    html +=
+      `<div class="reset muted">API 请求次数 ${fmtInt(t.requests)} · Tokens ${fmtTokens(t.total)}</div>` +
+      `<div class="reset muted">缓存命中 ${fmtTokens(t.cache)}${t.cacheMiss != null ? ` · 未命中 ${fmtTokens(t.cacheMiss)}` : ''} · 输出 ${fmtTokens(t.output)}</div>`;
+  }
+
+  if (m.errors && m.errors.length){
+    html += `<div class="reset err">部分接口失败：${m.errors.join('；')}</div>`;
+  }
+  body.innerHTML = html;
+}
+
+function renderQoder(q){
+  const plan = document.getElementById('qoder-plan');
+  const body = document.getElementById('qoder-body');
+  if (!q || !q.ok){
+    plan.textContent = '—';
+    body.innerHTML = `<div class="err">采集失败：${(q && q.error) || '未知错误'}</div>`;
+    return;
+  }
+  plan.textContent = q.site === 'intl' ? '国际版' : '国内版';
+
+  const unit = q.unit || 'credits';
+  let html = `<div class="win">
+    <div class="row"><span class="name">大模型 Credits</span><span class="pct">剩余 ${q.remainingPercent}%</span></div>
+    <div class="bar"><i style="width:${q.remainingPercent}%;background:${barColor(q.remainingPercent)}"></i></div>
+    <div class="reset">已用 ${fmtCredit(q.used)} / ${fmtCredit(q.total)} ${unit}</div>
+  </div>`;
+
+  const parts = [`剩余 ${fmtCredit(q.remaining)} ${unit}`];
+  if (q.hasShared) parts.push('含共享资源包');
+  // 平台偶发返回已过期的 nextResetAt（当前周期已结束），过期不展示以免误导
+  if (q.resetsAt && new Date(q.resetsAt).getTime() > Date.now()) {
+    parts.push(`重置于 ${new Date(q.resetsAt).toLocaleString()}`);
+  }
+  html += `<div class="reset muted">${parts.join(' · ')}</div>`;
+  html += `<div class="reset">${expirySummary(q.packExpiry)}</div>`;
+
+  body.innerHTML = html;
+}
+
+function renderMinimax(m){
+  const body = document.getElementById('minimax-body');
+  if (!m || !m.ok){
+    body.innerHTML = `<div class="err">采集失败：${(m && m.error) || '未知错误'}</div>`;
+    return;
+  }
+
+  const b = m.balance || {};
+  const sym = m.currency === 'USD' ? '$' : '¥';
+  // 金额最多保留 4 位小数，并去掉多余的尾随 0（98.00001 → 98.00001，1.5000 → 1.5）。
+  const money = (v) => v == null ? '—' : sym + Number(v).toFixed(4).replace(/\.?0+$/, '');
+
+  let html = `<div class="bal"><span class="k">可用余额</span><span class="amt">${money(b.available)}</span></div>`;
+  const today = m.todaySpent == null ? '—' : sym + fmtCredit(m.todaySpent) + (m.todaySpentEstimated ? '（估算）' : '');
+  html += `<div class="reset">今日消费 ${today}</div>`;
+  const parts = [];
+  if (b.cash != null) parts.push(`现金 ${money(b.cash)}`);
+  if (b.voucher != null) parts.push(`代金券 ${money(b.voucher)}`);
+  if (b.credit != null) parts.push(`积分 ${money(b.credit)}`);
+  if (parts.length) html += `<div class="reset muted">${parts.join(' · ')}</div>`;
+
+  body.innerHTML = html;
+}
+
+// 卡片数据源 → 渲染函数（键名与后端 ?source= 参数一致）
+const CARD_RENDER = {
+  codex: (d) => renderCodex(d.codex),
+  deepseek: (d) => renderDeepseek(d.deepseek, d.deepseekUsage),
+  workbuddy: (d) => renderWorkbuddy(d.workbuddy),
+  trae: (d) => renderTrae(d.trae),
+  mimo: (d) => renderMimo(d.mimo),
+  qoder: (d) => renderQoder(d.qoder),
+  minimax: (d) => renderMinimax(d.minimax),
+};
+const refreshing = new Set();
+
+// 各源最近采集时间里的最新一个，作为「最近采集」展示。
+function lastCollectedAt(data){
+  const ts = Object.keys(data)
+    .filter(k => k.endsWith('UpdatedAt'))
+    .map(k => new Date(data[k]).getTime())
+    .filter(Number.isFinite);
+  return ts.length ? new Date(Math.max.apply(null, ts)).toLocaleTimeString() : '—';
+}
+
+// 常规读取：各源直接返回后端最新缓存，不触发额外采集。
+async function load(){
+  try {
+    const r = await fetch('/api/usage', { cache: 'no-store' });
+    const data = await r.json();
+    adoptServerVisibility(data); // 显隐以服务端为准，跟随其他设备的改动
+    for (const src of Object.keys(CARD_RENDER)) {
+      if (refreshing.has(src)) continue; // 正在手动刷新的卡片，避免被旧值覆盖
+      CARD_RENDER[src](data);
+    }
+    document.getElementById('foot').textContent =
+      `界面每 ${REFRESH_MS/1000}s 刷新 · 最近采集 ${lastCollectedAt(data)} · 点击卡片可立即刷新`;
+  } catch (e) {
+    document.getElementById('foot').textContent = '刷新失败：' + e.message;
+  }
+}
+
+// 手动刷新单个卡片：只强制采集该源一次，其他源不受影响。
+async function refreshCard(card){
+  const src = card.dataset.source;
+  if (!src || refreshing.has(src)) return;
+  refreshing.add(src);
+  card.classList.add('refreshing');
+  try {
+    const r = await fetch(`/api/usage?source=${encodeURIComponent(src)}&refresh=1`, { cache: 'no-store' });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    CARD_RENDER[src](data);
+    card.classList.remove('refreshing');
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 700);
+    document.getElementById('foot').textContent = `「${src}」已手动刷新`;
+  } catch (e) {
+    card.classList.remove('refreshing');
+    document.getElementById('foot').textContent = `「${src}」刷新失败：${e.message}`;
+  } finally {
+    refreshing.delete(src);
+  }
+}
+
+document.querySelectorAll('.card[data-source]').forEach((card) => {
+  card.addEventListener('click', () => refreshCard(card));
+});
+
+// ---- 设置：自定义卡片顺序（左上角齿轮入口） ----
+const cards = Array.from(document.querySelectorAll('.grid .card[data-source]'));
+const ORDER_KEY = 'dashboard.cardOrder';
+const HIDDEN_KEY = 'dashboard.cardHidden';
+const DEFAULT_ORDER = cards.map(c => c.dataset.source);
+const gear = document.getElementById('gear');
+const overlay = document.getElementById('settings-overlay');
+const listEl = document.getElementById('settings-list');
+
+// 兼容历史配置：过滤未知源，补齐新增源，保证顺序列表与现有卡片一一对应。
+function normalizeOrder(saved){
+  if (!Array.isArray(saved)) return DEFAULT_ORDER.slice();
+  const known = saved.filter(s => DEFAULT_ORDER.indexOf(s) !== -1);
+  DEFAULT_ORDER.forEach(s => { if (known.indexOf(s) === -1) known.push(s); });
+  return known;
+}
+let order;
+try { order = normalizeOrder(JSON.parse(localStorage.getItem(ORDER_KEY) || 'null')); }
+catch (e) { order = DEFAULT_ORDER.slice(); }
+
+// 被隐藏（不显示）的模块集合，同样持久化在本地；并同步给服务端，让后台也不再采集。
+let hidden = new Set();
+try {
+  const arr = JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]');
+  if (Array.isArray(arr)) arr.forEach(s => { if (DEFAULT_ORDER.indexOf(s) !== -1) hidden.add(s); });
+} catch (e) {}
+
+// 上报当前隐藏集合：服务端据此裁剪后台采集（关闭的模块不再请求上游）。
+// 仅在用户主动切换时调用；页面加载时不主动上报，避免用本机状态覆盖服务端。
+function syncVisibilityToServer(){
+  fetch('/api/visibility', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hidden: Array.from(hidden) }),
+  }).catch(() => {});
+}
+
+// 显隐状态以服务端为准：别的设备改动后本机自动跟随，避免多设备互相覆盖。
+function adoptServerVisibility(data){
+  if (!Array.isArray(data.hiddenSources)) return;
+  const server = new Set(data.hiddenSources.filter(s => DEFAULT_ORDER.indexOf(s) !== -1));
+  const same = server.size === hidden.size && Array.from(server).every(s => hidden.has(s));
+  if (same) return;
+  hidden = server;
+  persistHidden(); applyVisibility();
+  if (overlay.classList.contains('show')) renderList();
+}
+
+// 用 grid 的 order 属性重排，不影响已有 DOM 与事件绑定。
+function applyOrder(){
+  order.forEach((src, i) => {
+    const card = cards.find(c => c.dataset.source === src);
+    if (card) card.style.order = i;
+  });
+}
+// 隐藏的卡片用 display:none 收起，后台仍会采集，重新显示时数据即为最新。
+function applyVisibility(){
+  cards.forEach(c => { c.style.display = hidden.has(c.dataset.source) ? 'none' : ''; });
+}
+function persistOrder(){ try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch (e) {} }
+function persistHidden(){ try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hidden))); } catch (e) {} }
+
+function renderList(){
+  listEl.innerHTML = order.map((src, i) => {
+    const card = cards.find(c => c.dataset.source === src);
+    const name = (card && card.dataset.title) || src;
+    return `<div class="set-row">
+      <span class="set-name">${name}</span>
+      <label class="set-switch" title="显示 / 隐藏">
+        <input type="checkbox" data-toggle="${src}"${hidden.has(src) ? '' : ' checked'}>
+        <span></span>
+      </label>
+      <span class="set-ctrl">
+        <button class="set-btn" data-move="${src}" data-dir="-1"${i === 0 ? ' disabled' : ''}>▲</button>
+        <button class="set-btn" data-move="${src}" data-dir="1"${i === order.length - 1 ? ' disabled' : ''}>▼</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
+// 开关只切换显隐，不重建列表，避免丢失焦点。
+listEl.addEventListener('change', (e) => {
+  const cb = e.target.closest('[data-toggle]');
+  if (!cb) return;
+  if (cb.checked) hidden.delete(cb.dataset.toggle); else hidden.add(cb.dataset.toggle);
+  persistHidden(); applyVisibility(); syncVisibilityToServer();
+});
+
+listEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-move]');
+  if (!btn || btn.disabled) return;
+  const i = order.indexOf(btn.dataset.move);
+  const j = i + Number(btn.dataset.dir);
+  if (i < 0 || j < 0 || j >= order.length) return;
+  [order[i], order[j]] = [order[j], order[i]];
+  persistOrder(); applyOrder(); renderList();
+});
+
+function openSettings(){ renderList(); overlay.classList.add('show'); gear.classList.add('open'); }
+function closeSettings(){ overlay.classList.remove('show'); gear.classList.remove('open'); }
+gear.addEventListener('click', () => overlay.classList.contains('show') ? closeSettings() : openSettings());
+overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSettings(); });
+document.getElementById('settings-close').addEventListener('click', closeSettings);
+document.getElementById('settings-reset').addEventListener('click', () => {
+  order = DEFAULT_ORDER.slice(); hidden.clear();
+  persistOrder(); persistHidden(); applyOrder(); applyVisibility(); renderList(); syncVisibilityToServer();
+});
+
+applyOrder();
+applyVisibility();
+// 注意：页面加载时不主动上报显隐，显隐以服务端为准（见 load() 里的 adoptServerVisibility）。
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# 备份目录 / 备份文件(防止把未脱敏备份拷进仓库)
+*_backup/
+*_backup
+*.bak
+
+# 兜底:凭据与运行时状态(正常情况下由 dashboard/.gitignore 排除)
+dashboard/config/*.json
+!dashboard/config/*.example.json
+dashboard/data/
+
+# 依赖与杂项
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

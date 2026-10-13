@@ -92,7 +92,7 @@
 
   <div class="wrap">
     <div class="clock">
-      <div class="time" id="time">--:--:--</div>
+      <div class="time" id="time">--:--</div>
       <div class="date" id="date">&nbsp;</div>
     </div>
 
@@ -137,16 +137,20 @@
   </div>
 
 <script>
-const REFRESH_MS = 30000;
+const REFRESH_MS = 60000;
+const CLOCK_MS = 15000;
 
 function pad(n){ return String(n).padStart(2,'0'); }
 function tick(){
   const d = new Date();
-  document.getElementById('time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  const wk = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
-  document.getElementById('date').textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${wk}`;
+  const t = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const el = document.getElementById('time');
+  if (el.textContent !== t) el.textContent = t;
+  const ds = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]}`;
+  const de = document.getElementById('date');
+  if (de.textContent !== ds) de.textContent = ds;
 }
-setInterval(tick, 1000); tick();
+setInterval(tick, CLOCK_MS); tick();
 
 function barColor(p){ return p <= 10 ? 'var(--bad)' : p <= 25 ? 'var(--warn)' : 'var(--ok)'; }
 function fmtInt(n){ return Math.round(Number(n) || 0).toLocaleString('en-US'); }

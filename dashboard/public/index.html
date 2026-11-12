@@ -225,27 +225,25 @@ function renderDeepseek(d, u){
   const t = uOk ? (u.today || {}) : null;
   const cur = (uOk && u.currency) || 'CNY';
 
-  // 一行汇总：余额 · 今日消费
+  // 余额（大字）+ 今日消费，两行展示
   if (!d || !d.ok){
     html += `<div class="err">余额采集失败：${(d && d.error) || '未知错误'}</div>`;
   } else {
     const infos = d.balanceInfos || [];
-    const parts = [];
-    if (infos.length){
-      const b = infos[0];
-      parts.push(`余额 ${curSym(b.currency)}${b.total_balance ?? '—'}`);
-    }
-    parts.push(`今日消费 ${uOk ? fmtMoney(t.cost, cur) : '—'}`);
-    html += `<div class="reset muted">${parts.join(' · ')}</div>`;
+    const b = infos[0];
+    const bal = b && b.total_balance != null
+      ? curSym(b.currency) + Number(b.total_balance).toFixed(4).replace(/\.?0+$/, '')
+      : '—';
+    html += `<div class="bal"><span class="k">可用余额</span><span class="amt">${bal}</span></div>`;
+    html += `<div class="reset">今日消费 ${uOk ? fmtMoney(t.cost, cur) : '—'}</div>`;
   }
 
   // 今日用量（平台内部接口）
-  html += `<div class="sect">今日用量</div>`;
   if (!uOk){
     html += `<div class="err">${(u && u.error) || '未配置用量 Token'}</div>`;
   } else {
     html +=
-      `<div class="reset muted">API请求 ${fmtInt(t.requests)}次 · Tokens ${fmtTokens(t.tokens)}</div>` +
+      `<div class="reset muted">今日API请求 ${fmtInt(t.requests)}次 · Tokens ${fmtTokens(t.tokens)}</div>` +
       `<div class="reset muted">缓存命中 ${fmtTokens(t.cacheHit)} · 未命中 ${fmtTokens(t.cacheMiss)} · 输出 ${fmtTokens(t.response)}</div>`;
   }
 
